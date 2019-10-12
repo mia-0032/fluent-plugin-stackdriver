@@ -9,6 +9,8 @@ module Fluent
     end
 
     class Writer
+      RETRY_LIMIT = 5
+
       def initialize(project, custom_metrics, log)
         @custom_metrics = custom_metrics
         @project_name = Google::Cloud::Monitoring::V3::MetricServiceClient.project_path project
@@ -22,15 +24,27 @@ module Fluent
       end
 
       def write(start_time, end_time, value)
-        time_series = create_time_series
-        point = Google::Monitoring::V3::Point.new
-        point.interval = create_time_interval start_time, end_time
-        point.value = create_typed_value value
-        time_series.points.push point
+        retry_count = 0
+        begin
+          time_series = create_time_series
+          point = Google::Monitoring::V3::Point.new
+          point.interval = create_time_interval start_time, end_time
+          point.value = create_typed_value value
+          time_series.points.push point
 
-        log.debug "Create time series", start_time: Time.at(start_time).to_s, end_time: Time.at(end_time).to_s, value: value, metric_name: @metric_name
-        # Only one point can be written per TimeSeries per request.
-        @metric_service_client.create_time_series @project_name, [time_series]
+          log.debug "Create time series", start_time: Time.at(start_time).to_s, end_time: Time.at(end_time).to_s, value: value, metric_name: @metric_name
+          # Only one point can be written per TimeSeries per request.
+          @metric_service_client.create_time_series @project_name, [time_series]
+        rescue Google::Gax::RetryError => ex
+          retry_count += 1
+          if retry_count >= RETRY_LIMIT
+            raise ex
+          end
+          log.info "Google::Gax::RetryError occured", error_msg: ex.to_s
+          # The Stackdriver API recommends sending at most 1 TimeSeries value every 30s
+          sleep 30
+          retry
+        end
       end
 
       private

@@ -46,11 +46,9 @@ module Fluent
     end
 
     def write(chunk)
-      current_time = Time.now.to_i
-
       chunk.msgpack_each do |tag, time, record|
-        if (current_time - time) >= PAST_DATA_TIME_LIMIT
-          log.warn 'Drop data point because it cannot be written more than 24h in the past', time: Time.at(time).to_s, metric_name: @metric_name
+        if (Time.now.to_i - time) >= PAST_DATA_TIME_LIMIT
+          log.warn 'Drop data point because it cannot be written more than 24h in the past', time: Time.at(time).to_s, metric_type: @custom_metrics.type
           next
         end
 
